@@ -17,7 +17,9 @@ import com.google.firebase.auth.FirebaseAuthInvalidUserException
 import com.google.firebase.auth.FirebaseAuthUserCollisionException
 import com.google.firebase.auth.FirebaseUser
 import com.google.firebase.auth.GoogleAuthProvider
+import com.google.firebase.auth.UserProfileChangeRequest
 import com.google.firebase.firestore.FirebaseFirestore
+import com.google.firebase.firestore.QuerySnapshot
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -30,20 +32,12 @@ private const val USERS_COLLECTION = "users"
 class AuthViewModel(application: Application) : AndroidViewModel(application) {
     private val auth = FirebaseAuth.getInstance()
     private val firestore = FirebaseFirestore.getInstance()
+    private lateinit var googleSignInClient: GoogleSignInClient
     private val _authState = MutableStateFlow<AuthState>(AuthState.Unauthenticated)
     val authState: StateFlow<AuthState> = _authState.asStateFlow()
 
-    private var googleSignInClient: GoogleSignInClient? = null
-
     init {
-        // Check if user is already signed in
-        if (auth.currentUser != null) {
-            _authState.value = AuthState.Authenticated
-        }
-        setupAuthListener()
-    }
-
-    private fun setupAuthListener() {
+        // Set up auth state listener
         auth.addAuthStateListener { firebaseAuth ->
             _authState.value = if (firebaseAuth.currentUser != null) {
                 AuthState.Authenticated
@@ -62,48 +56,35 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
         googleSignInClient = GoogleSignIn.getClient(getApplication(), gso)
     }
 
-    fun getGoogleSignInIntent(): Intent {
-        return googleSignInClient?.signInIntent ?: throw IllegalStateException("GoogleSignInClient not initialized")
-    }
+    fun getGoogleSignInIntent() = googleSignInClient.signInIntent
 
     fun handleGoogleSignInResult(data: Intent?) {
-        try {
-            val task = GoogleSignIn.getSignedInAccountFromIntent(data)
-            val account = task.getResult(ApiException::class.java)
-            account?.let { firebaseAuthWithGoogle(it) }
-        } catch (e: ApiException) {
-            _authState.value = AuthState.Error("Google sign in failed: ${e.message}")
+        viewModelScope.launch {
+            try {
+                _authState.value = AuthState.Loading
+                val account = GoogleSignIn.getSignedInAccountFromIntent(data).await()
+                val credential = GoogleAuthProvider.getCredential(account.idToken, null)
+                auth.signInWithCredential(credential).await()
+                // Auth state listener will update the state
+            } catch (e: Exception) {
+                Log.e(TAG, "Google sign in failed", e)
+                _authState.value = AuthState.Error("Google sign in failed: ${e.message}")
+            }
         }
     }
 
-    private fun firebaseAuthWithGoogle(account: GoogleSignInAccount) {
-        val credential = GoogleAuthProvider.getCredential(account.idToken, null)
-        auth.signInWithCredential(credential)
-            .addOnCompleteListener { task ->
-                if (task.isSuccessful) {
-                    val user = auth.currentUser
-                    user?.let { updateUserProfile(it.uid, it.email ?: "", it.displayName ?: "") }
-                } else {
-                    _authState.value = AuthState.Error("Authentication failed: ${task.exception?.message}")
-                }
+    fun signOut() {
+        viewModelScope.launch {
+            try {
+                _authState.value = AuthState.Loading
+                auth.signOut()
+                googleSignInClient.signOut().await()
+                // Auth state listener will update the state
+            } catch (e: Exception) {
+                Log.e(TAG, "Sign out failed", e)
+                _authState.value = AuthState.Error("Sign out failed: ${e.message}")
             }
-    }
-
-    private fun updateUserProfile(userId: String, email: String, displayName: String) {
-        val userData = hashMapOf(
-            "email" to email,
-            "displayName" to displayName,
-            "lastLogin" to System.currentTimeMillis()
-        )
-
-        firestore.collection(USERS_COLLECTION).document(userId)
-            .set(userData)
-            .addOnSuccessListener {
-                _authState.value = AuthState.Authenticated
-            }
-            .addOnFailureListener { e ->
-                _authState.value = AuthState.Error("Failed to update profile: ${e.message}")
-            }
+        }
     }
 
     fun signIn(email: String, password: String) {
@@ -129,12 +110,6 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
                     _authState.value = AuthState.Error("Sign up failed: ${task.exception?.message}")
                 }
             }
-    }
-
-    fun signOut() {
-        auth.signOut()
-        googleSignInClient?.signOut()
-        _authState.value = AuthState.Unauthenticated
     }
 
     fun resetPassword(email: String) {
@@ -173,6 +148,25 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
             } catch (e: Exception) {
                 Log.e(TAG, "Error updating display name", e)
                 onError("Failed to update name: ${e.message}")
+            }
+        }
+    }
+
+    private fun updateUserProfile(uid: String, email: String, displayName: String) {
+        viewModelScope.launch {
+            try {
+                val userData = hashMapOf(
+                    "email" to email,
+                    "displayName" to displayName,
+                    "createdAt" to com.google.firebase.Timestamp.now()
+                )
+                
+                firestore.collection(USERS_COLLECTION)
+                    .document(uid)
+                    .set(userData)
+                    .await()
+            } catch (e: Exception) {
+                Log.e(TAG, "Error updating user profile", e)
             }
         }
     }

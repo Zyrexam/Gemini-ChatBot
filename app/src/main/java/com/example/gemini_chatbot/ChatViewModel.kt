@@ -5,23 +5,15 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.google.ai.client.generativeai.GenerativeModel
 import com.google.firebase.auth.FirebaseAuth
-import com.google.firebase.firestore.FirebaseFirestore
-import com.google.firebase.firestore.Query
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.tasks.await
-import java.util.UUID
 
 private const val TAG = "ChatViewModel"
-private const val USERS_COLLECTION = "users"
-private const val CHATS_COLLECTION = "chats"
-private const val MESSAGES_COLLECTION = "messages"
 
 class ChatViewModel : ViewModel() {
     private val auth = FirebaseAuth.getInstance()
-    private val firestore = FirebaseFirestore.getInstance()
 
     // Gemini API key - should be stored more securely in production
     private val apiKey = BuildConfig.GEMINI_API_KEY
@@ -36,11 +28,8 @@ class ChatViewModel : ViewModel() {
     private val _uiState = MutableStateFlow<ChatUiState>(ChatUiState.Idle)
     val uiState: StateFlow<ChatUiState> = _uiState.asStateFlow()
 
-    private var currentChatId: String? = null
-
     init {
         initializeGenerativeModel()
-        loadMessages()
     }
 
     private fun initializeGenerativeModel() {
@@ -55,70 +44,7 @@ class ChatViewModel : ViewModel() {
         }
     }
 
-    private fun loadMessages() {
-        val userId = auth.currentUser?.uid ?: return
-
-        viewModelScope.launch {
-            try {
-                // Get or create chat
-                currentChatId = getCurrentOrCreateChat(userId)
-
-                // Load messages for this chat
-                firestore.collection(USERS_COLLECTION)
-                    .document(userId)
-                    .collection(CHATS_COLLECTION)
-                    .document(currentChatId!!)
-                    .collection(MESSAGES_COLLECTION)
-                    .orderBy("timestamp", Query.Direction.ASCENDING)
-                    .addSnapshotListener { snapshot, e ->
-                        if (e != null) {
-                            Log.w(TAG, "Listen failed.", e)
-                            return@addSnapshotListener
-                        }
-
-                        if (snapshot != null) {
-                            val messagesList = snapshot.documents.mapNotNull { doc ->
-                                doc.toObject(ChatMessage::class.java)
-                            }
-                            _messages.value = messagesList
-                        }
-                    }
-            } catch (e: Exception) {
-                Log.e(TAG, "Error loading messages", e)
-                _uiState.value = ChatUiState.Error("Failed to load messages: ${e.message}")
-            }
-        }
-    }
-
-    private suspend fun getCurrentOrCreateChat(userId: String): String {
-        // Check if user has any chats
-        val chatsRef = firestore.collection(USERS_COLLECTION)
-            .document(userId)
-            .collection(CHATS_COLLECTION)
-
-        val chatsSnapshot = chatsRef.limit(1).get().await()
-
-        // If no chats exist, create a new one
-        if (chatsSnapshot.isEmpty) {
-            val newChatId = UUID.randomUUID().toString()
-            val chatData = hashMapOf(
-                "title" to "New Chat",
-                "createdAt" to System.currentTimeMillis(),
-                "lastMessage" to "No messages yet"
-            )
-
-            chatsRef.document(newChatId).set(chatData).await()
-            return newChatId
-        }
-
-        // Otherwise return the first chat
-        return chatsSnapshot.documents[0].id
-    }
-
     fun sendMessage(messageText: String) {
-        val userId = auth.currentUser?.uid ?: return
-        if (currentChatId == null) return
-
         viewModelScope.launch {
             try {
                 _isLoading.value = true
@@ -131,22 +57,8 @@ class ChatViewModel : ViewModel() {
                     status = MessageStatus.SENDING
                 )
 
-                // Save to Firestore
-                val messageRef = firestore.collection(USERS_COLLECTION)
-                    .document(userId)
-                    .collection(CHATS_COLLECTION)
-                    .document(currentChatId!!)
-                    .collection(MESSAGES_COLLECTION)
-                    .document(userMessage.id)
-
-                messageRef.set(userMessage).await()
-
-                // Update chat's last message
-                firestore.collection(USERS_COLLECTION)
-                    .document(userId)
-                    .collection(CHATS_COLLECTION)
-                    .document(currentChatId!!)
-                    .update("lastMessage", messageText)
+                // Add user message to the list
+                _messages.value = _messages.value + userMessage
 
                 // Get AI response
                 val response = generativeModel.generateContent(messageText)
@@ -158,16 +70,8 @@ class ChatViewModel : ViewModel() {
                     isUser = false
                 )
 
-                // Save AI message to Firestore
-                firestore.collection(USERS_COLLECTION)
-                    .document(userId)
-                    .collection(CHATS_COLLECTION)
-                    .document(currentChatId!!)
-                    .collection(MESSAGES_COLLECTION)
-                    .document(aiMessage.id)
-                    .set(aiMessage)
-                    .await()
-
+                // Add AI message to the list
+                _messages.value = _messages.value + aiMessage
                 _uiState.value = ChatUiState.Success(aiResponseText)
 
             } catch (e: Exception) {
@@ -181,15 +85,8 @@ class ChatViewModel : ViewModel() {
                     status = MessageStatus.ERROR
                 )
 
-                // Save error message to Firestore
-                firestore.collection(USERS_COLLECTION)
-                    .document(userId)
-                    .collection(CHATS_COLLECTION)
-                    .document(currentChatId!!)
-                    .collection(MESSAGES_COLLECTION)
-                    .document(errorMessage.id)
-                    .set(errorMessage)
-                    .await()
+                // Add error message to the list
+                _messages.value = _messages.value + errorMessage
 
             } finally {
                 _isLoading.value = false
@@ -205,32 +102,7 @@ class ChatViewModel : ViewModel() {
     }
 
     fun clearChat() {
-        val userId = auth.currentUser?.uid ?: return
-        viewModelScope.launch {
-            try {
-                _isLoading.value = true
-                _uiState.value = ChatUiState.Loading
-
-                val chatRef = firestore.collection(USERS_COLLECTION)
-                    .document(userId)
-                    .collection(CHATS_COLLECTION)
-                    .document(currentChatId!!)
-                    .collection(MESSAGES_COLLECTION)
-
-                val messages = chatRef.get().await()
-                for (message in messages.documents) {
-                    message.reference.delete().await()
-                }
-
-                _messages.value = emptyList()
-                _uiState.value = ChatUiState.Success("Chat cleared successfully")
-
-            } catch (e: Exception) {
-                Log.e(TAG, "Error clearing chat", e)
-                _uiState.value = ChatUiState.Error("Failed to clear chat: ${e.message}")
-            } finally {
-                _isLoading.value = false
-            }
-        }
+        _messages.value = emptyList()
+        _uiState.value = ChatUiState.Idle
     }
 }

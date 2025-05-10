@@ -5,8 +5,8 @@ import java.util.UUID
 // Model for chat messages
 data class ChatMessage(
     val id: String = UUID.randomUUID().toString(),
-    val text: String,
-    val isUser: Boolean,
+    val text: String = "",
+    val isUser: Boolean = false,
     val timestamp: Long = System.currentTimeMillis(),
     val status: MessageStatus = MessageStatus.SENT
 )
