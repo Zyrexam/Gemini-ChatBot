@@ -15,13 +15,12 @@ A modern Android chat application built with Jetpack Compose that implements Fir
   - Message History
   - Typing Indicators
   - Suggestion Chips for Quick Responses
-  - Dark/Light Theme Support
+
 
 - **Technical Stack**
   - Kotlin
   - Jetpack Compose
   - Firebase Authentication
-  - Firebase Firestore
   - MVVM Architecture
   - Coroutines & Flow
   - Material Design 3
