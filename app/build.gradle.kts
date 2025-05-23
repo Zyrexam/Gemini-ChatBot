@@ -65,7 +65,7 @@ android {
 
 dependencies {
     // Core Android dependencies
-    implementation("androidx.core:core-ktx:1.12.0")
+    implementation(libs.androidx.core.ktx.v1120)
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.7.0")
     implementation("androidx.activity:activity-compose:1.8.2")
 
@@ -90,6 +90,7 @@ dependencies {
     implementation(platform("com.google.firebase:firebase-bom:33.13.0"))
     implementation("com.google.firebase:firebase-auth")
     implementation("com.google.firebase:firebase-analytics")
+    implementation("com.google.firebase:firebase-firestore-ktx:24.10.0")
 
     // Google Services and Credential Manager
     implementation("com.google.android.gms:play-services-auth:20.7.0")
@@ -98,7 +99,9 @@ dependencies {
     implementation("com.google.android.libraries.identity.googleid:googleid:1.1.1")
 
     // Gemini AI
-    implementation("com.google.ai.client.generativeai:generativeai:0.2.1")
+    implementation(libs.generativeai)
+
+
 
     // Testing
     testImplementation("junit:junit:4.13.2")

@@ -4,6 +4,7 @@ import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.google.ai.client.generativeai.GenerativeModel
+import com.google.ai.client.generativeai.type.GenerationConfig
 import com.google.firebase.auth.FirebaseAuth
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -29,14 +30,19 @@ class ChatViewModel : ViewModel() {
     val uiState: StateFlow<ChatUiState> = _uiState.asStateFlow()
 
     init {
+        Log.d(TAG, "Initializing ChatViewModel with API key: ${apiKey.take(5)}...")
         initializeGenerativeModel()
     }
 
     private fun initializeGenerativeModel() {
         try {
+            Log.d(TAG, "Initializing Gemini model...")
+           
+
             generativeModel = GenerativeModel(
-                modelName = "gemini-1.0-pro",
-                apiKey = apiKey
+                modelName = "gemini-1.5-pro",
+                apiKey = apiKey,
+//                generationConfig = generationConfig
             )
         } catch (e: Exception) {
             Log.e(TAG, "Error initializing Gemini model", e)
@@ -60,9 +66,20 @@ class ChatViewModel : ViewModel() {
                 // Add user message to the list
                 _messages.value = _messages.value + userMessage
 
+                Log.d(TAG, "Sending message to Gemini: ${messageText.take(50)}...")
+
                 // Get AI response
                 val response = generativeModel.generateContent(messageText)
-                val aiResponseText = response.text?.trim() ?: "Sorry, I couldn't generate a response."
+                Log.d(TAG, "Received response from Gemini")
+
+                val aiResponseText = try {
+                    response.text?.trim() ?: "Sorry, I couldn't generate a response."
+                } catch (e: Exception) {
+                    Log.e(TAG, "Error parsing response", e)
+                    "Sorry, I encountered an error while processing the response."
+                }
+
+                Log.d(TAG, "AI Response: ${aiResponseText.take(50)}...")
 
                 // Create AI message
                 val aiMessage = ChatMessage(

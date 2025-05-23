@@ -179,6 +179,7 @@ class MainActivity : ComponentActivity() {
             Column(
                 modifier = Modifier
                     .fillMaxSize()
+                    .imePadding()
                     .padding(paddingValues)
             ) {
                 LazyColumn(
@@ -200,13 +201,12 @@ class MainActivity : ComponentActivity() {
 
                 if (messages.isEmpty()) {
                     EmptyStateMessage()
+                    SuggestionChips(
+                        onSuggestionClick = { suggestion ->
+                            messageText = suggestion
+                        }
+                    )
                 }
-
-                SuggestionChips(
-                    onSuggestionClick = { suggestion ->
-                        messageText = suggestion
-                    }
-                )
 
                 Row(
                     modifier = Modifier
@@ -359,8 +359,7 @@ class MainActivity : ComponentActivity() {
         val suggestions = listOf(
             "What can you do?",
             "Tell me a joke",
-            "Help me with coding",
-            "Explain a concept"
+            "Coding help"
         )
 
         Row(
@@ -372,7 +371,7 @@ class MainActivity : ComponentActivity() {
             suggestions.forEach { suggestion ->
                 SuggestionChip(
                     onClick = { onSuggestionClick(suggestion) },
-                    label = { Text(suggestion) }
+                    label = { Text(suggestion, maxLines = 1) }
                 )
             }
         }

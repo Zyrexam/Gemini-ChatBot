@@ -7,19 +7,11 @@ import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.google.android.gms.auth.api.signin.GoogleSignIn
-import com.google.android.gms.auth.api.signin.GoogleSignInAccount
 import com.google.android.gms.auth.api.signin.GoogleSignInClient
 import com.google.android.gms.auth.api.signin.GoogleSignInOptions
-import com.google.android.gms.common.api.ApiException
 import com.google.firebase.auth.FirebaseAuth
-import com.google.firebase.auth.FirebaseAuthInvalidCredentialsException
-import com.google.firebase.auth.FirebaseAuthInvalidUserException
-import com.google.firebase.auth.FirebaseAuthUserCollisionException
-import com.google.firebase.auth.FirebaseUser
 import com.google.firebase.auth.GoogleAuthProvider
-import com.google.firebase.auth.UserProfileChangeRequest
 import com.google.firebase.firestore.FirebaseFirestore
-import com.google.firebase.firestore.QuerySnapshot
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -51,12 +43,11 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
         val gso = GoogleSignInOptions.Builder(GoogleSignInOptions.DEFAULT_SIGN_IN)
             .requestIdToken(webClientId)
             .requestEmail()
+            .requestProfile() // Add this
             .build()
 
         googleSignInClient = GoogleSignIn.getClient(getApplication(), gso)
     }
-
-    fun getGoogleSignInIntent() = googleSignInClient.signInIntent
 
     fun handleGoogleSignInResult(data: Intent?) {
         viewModelScope.launch {
@@ -64,14 +55,26 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
                 _authState.value = AuthState.Loading
                 val account = GoogleSignIn.getSignedInAccountFromIntent(data).await()
                 val credential = GoogleAuthProvider.getCredential(account.idToken, null)
-                auth.signInWithCredential(credential).await()
-                // Auth state listener will update the state
+
+                // Add error handling and logging
+                val result = auth.signInWithCredential(credential).await()
+                result.user?.let { user ->
+                    // Update user profile in Firestore
+                    updateUserProfile(
+                        uid = user.uid,
+                        email = user.email ?: "",
+                        displayName = user.displayName ?: user.email?.split("@")?.first() ?: "User"
+                    )
+                }
             } catch (e: Exception) {
                 Log.e(TAG, "Google sign in failed", e)
                 _authState.value = AuthState.Error("Google sign in failed: ${e.message}")
             }
         }
     }
+
+    fun getGoogleSignInIntent() = googleSignInClient.signInIntent
+
 
     fun signOut() {
         viewModelScope.launch {
@@ -119,7 +122,8 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
                 if (task.isSuccessful) {
                     _authState.value = AuthState.Unauthenticated
                 } else {
-                    _authState.value = AuthState.Error("Password reset failed: ${task.exception?.message}")
+                    _authState.value =
+                        AuthState.Error("Password reset failed: ${task.exception?.message}")
                 }
             }
     }
@@ -160,7 +164,7 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
                     "displayName" to displayName,
                     "createdAt" to com.google.firebase.Timestamp.now()
                 )
-                
+
                 firestore.collection(USERS_COLLECTION)
                     .document(uid)
                     .set(userData)
